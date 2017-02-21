@@ -1,3 +1,5 @@
+{-# LANGUAGE RankNTypes #-}
+
 module Rel8.IO
   ( select
   , update
@@ -8,19 +10,36 @@ module Rel8.IO
   , delete
   ) where
 
-import Control.Monad (void)
+import Control.Monad ((>=>), void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Int (Int64)
+import qualified Data.List.NonEmpty as NEL
 import Data.Maybe (fromJust)
+import Data.String (fromString)
+import Data.Text.Lazy (unpack)
 import Database.PostgreSQL.Simple (Connection)
+import qualified Database.PostgreSQL.Simple as Pg
+import qualified Database.PostgreSQL.Simple.FromRow as Pg
 import qualified Opaleye as O
+import qualified Opaleye.Internal.HaskellDB.PrimQuery as O
+import qualified Opaleye.Internal.Optimize as O
+import qualified Opaleye.Internal.PrimQuery as O
+import qualified Opaleye.Internal.QueryArr as O
 import qualified Opaleye.Internal.RunQuery as O
+import qualified Opaleye.Internal.Sql as O (sql)
+import qualified Opaleye.Internal.Table as O
+import qualified Opaleye.Internal.Tag as O
+import qualified Opaleye.Internal.Unpackspec as O
 import Rel8.Internal.Expr
 import Rel8.Internal.Operators
+import Rel8.Internal.SqlPrinter
 import Rel8.Internal.Table
 import Rel8.Internal.Types (Insert, QueryResult)
 import Streaming (Stream, Of)
 import qualified Streaming.Prelude as S
+import Text.PrettyPrint.Leijen.Text (renderPretty, displayT, Doc)
+
+type QueryRunner m = forall a. Pg.RowParser a -> Pg.Query -> Stream (Of a) m ()
 
 --------------------------------------------------------------------------------
 -- | Given a database query, execute this query and return a 'Stream' of
@@ -28,14 +47,11 @@ import qualified Streaming.Prelude as S
 select
   :: (MonadIO m, Table rows results)
   => Connection -> O.Query rows -> Stream (Of results) m ()
-select connection query = do
-  results <-
-    liftIO $
-    O.runQueryExplicit
-      queryRunner
-      connection
-      query
-  S.each results
+select connection query =
+  runQueryExplicit
+    (\parser -> liftIO . Pg.queryWith_ parser connection >=> S.each)
+    queryRunner
+    query
 
 insert
   :: (BaseTable table, MonadIO m)
@@ -47,9 +63,12 @@ insertReturning
   :: (BaseTable table, MonadIO m)
   => Connection -> [table Insert] -> Stream (Of (table QueryResult)) m ()
 insertReturning conn rows =
-  do results <-
-       liftIO (O.runInsertManyReturningExplicit queryRunner conn tableDefinition rows id)
-     S.each results
+  runInsertManyReturningExplicit
+    (\parser -> liftIO . Pg.queryWith_ parser conn >=> S.each)
+    queryRunner
+    tableDefinition
+    rows
+    id
 
 insert1Returning
   :: (BaseTable table, MonadIO m)
@@ -76,17 +95,14 @@ updateReturning
   -> (table Expr -> Expr bool)
   -> (table Expr -> table Expr)
   -> Stream (Of (table QueryResult)) m ()
-updateReturning conn f up = do
-  r <-
-    liftIO $
-    O.runUpdateReturningExplicit
-      queryRunner
-      conn
-      tableDefinitionUpdate
-      up
-      (exprToColumn . toNullable . f)
-      id
-  S.each r
+updateReturning conn f up =
+  runUpdateReturningExplicit
+    (\parser -> liftIO . Pg.queryWith_ parser conn >=> S.each)
+    queryRunner
+    tableDefinitionUpdate
+    up
+    (exprToColumn . toNullable . f)
+    id
 
 -- | Given a 'BaseTable' and a predicate, @DELETE@ all rows that match.
 delete
@@ -101,3 +117,75 @@ queryRunner =
   O.QueryRunner (void unpackColumns)
                 (const rowParser)
                 (\_columns -> True) -- TODO Will we support 0-column queries?
+
+--------------------------------------------------------------------------------
+
+runQueryExplicit
+  :: Monad m
+  => QueryRunner m
+  -> O.QueryRunner columns haskells
+  -> O.Query columns
+  -> Stream (Of haskells) m ()
+runQueryExplicit io qr q = maybe (return ()) (io parser) sql
+  where (sql, parser) = prepareQuery qr q
+
+runInsertManyReturningExplicit
+  :: Monad m
+  => QueryRunner m
+  -> O.QueryRunner columnsReturned haskells
+  -> O.Table columnsW columnsR
+  -> [columnsW]
+  -> (columnsR -> columnsReturned)
+  -> Stream (Of haskells) m ()
+runInsertManyReturningExplicit io qr t columns r =
+  case NEL.nonEmpty columns of
+    Nothing -> return ()
+    Just columns' ->
+      io parser (fromString (O.arrangeInsertManyReturningSql u t columns' r))
+  where
+    O.QueryRunner u _ _ = qr
+    parser = O.prepareRowParser qr (r v)
+    O.Table _ (O.TableProperties _ (O.View v)) = t
+
+runUpdateReturningExplicit
+  :: QueryRunner m
+  -> O.QueryRunner columnsReturned haskells
+  -> O.Table columnsW columnsR
+  -> (columnsR -> columnsW)
+  -> (columnsR -> O.Column O.PGBool)
+  -> (columnsR -> columnsReturned)
+  -> Stream (Of haskells) m ()
+runUpdateReturningExplicit io qr t up cond r =
+  io parser (fromString (O.arrangeUpdateReturningSql u t up cond r))
+  where
+    O.QueryRunner u _ _ = qr
+    parser = O.prepareRowParser qr (r v)
+    O.Table _ (O.TableProperties _ (O.View v)) = t
+
+prepareQuery
+  :: O.QueryRunner columns haskells
+  -> O.Query columns
+  -> (Maybe Pg.Query, Pg.RowParser haskells)
+prepareQuery qr@(O.QueryRunner u _ _) q =
+  (fmap (fromString . unpack . displayT . renderPretty 1 120) sql, parser)
+  where
+    (b, sql) = showSqlExplicit u q
+    parser = O.prepareRowParser qr b
+
+showSqlExplicit :: O.Unpackspec s t -> O.QueryArr () s -> (s, Maybe Doc)
+showSqlExplicit up q =
+  case O.runSimpleQueryArrStart q () of
+    (x, y, z) -> (x, (formatAndShowSQL (O.collectPEs up x, O.optimize y, z)))
+
+formatAndShowSQL
+  :: ([O.PrimExpr],O.PrimQuery' a,O.Tag) -> Maybe Doc
+formatAndShowSQL =
+  fmap (ppSql . O.sql) . traverse2Of3 O.removeEmpty
+  where
+        -- Just a lens
+        traverse2Of3
+          :: Functor f
+          => (a -> f b) -> (x,a,y) -> f (x,b,y)
+        traverse2Of3 f (x,y,z) =
+          fmap (\y' -> (x,y',z))
+               (f y)
