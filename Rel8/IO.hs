@@ -33,6 +33,7 @@ import qualified Opaleye.Internal.Unpackspec as O
 import Rel8.Internal.Expr
 import Rel8.Internal.Operators
 import Rel8.Internal.SqlPrinter
+import Rel8.Internal.SqlTransformations
 import Rel8.Internal.Table
 import Rel8.Internal.Types (Insert, QueryResult)
 import Streaming (Stream, Of)
@@ -180,7 +181,7 @@ showSqlExplicit up q =
 formatAndShowSQL
   :: ([O.PrimExpr],O.PrimQuery' a,O.Tag) -> Maybe Doc
 formatAndShowSQL =
-  fmap (ppSql . O.sql) . traverse2Of3 O.removeEmpty
+  fmap (ppSelect . simplifySelect . O.sql) . traverse2Of3 O.removeEmpty
   where
         -- Just a lens
         traverse2Of3

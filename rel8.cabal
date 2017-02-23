@@ -31,6 +31,7 @@ library
                        Rel8.Internal.Table
                        Rel8.Internal.Types
                        Rel8.Internal.SqlPrinter
+                       Rel8.Internal.SqlTransformations
   other-extensions:    Arrows, ConstraintKinds, DataKinds, DefaultSignatures, DeriveGeneric, FlexibleContexts, FlexibleInstances, FunctionalDependencies, KindSignatures, PolyKinds, ScopedTypeVariables, TypeFamilies, TypeOperators, UndecidableInstances, RankNTypes
   build-depends:       aeson
                      , base >=4.09 && <4.11

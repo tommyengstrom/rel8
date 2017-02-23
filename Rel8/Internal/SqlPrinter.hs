@@ -166,6 +166,46 @@ ppSqlExpr expr =
     --            [align (fillSep (punctuate comma (map ppSqlExpr es))), brackets])
     --     ]
 
+-- | Top-level pretty printer.
+ppSelect :: Select -> Doc
+ppSelect (SelectFrom s) = ppSelectFrom s
+ppSelect (Table table) =
+  ppSelectFrom
+    (From
+     { tables = [Table table]
+     , attrs = Star
+     , criteria = []
+     , groupBy = Nothing
+     , orderBy = []
+     , limit = Nothing
+     , offset = Nothing
+     })
+ppSelect (SelectValues v) = ppSelectValues v
+ppSelect (SelectBinary v) = ppSelectBinary v
+ppSelect (SelectLabel v)  = ppSelectLabel v
+ppSelect (RelExpr expr) =
+  ppSelectFrom
+    (From
+     { tables = []
+     , attrs = (SelectAttrs ((expr, Nothing) NEL.:| []))
+     , criteria = []
+     , groupBy = Nothing
+     , orderBy = []
+     , limit = Nothing
+     , offset = Nothing
+     })
+ppSelect (SelectJoin j) =
+  ppSelectFrom
+    (From
+     { tables = [SelectJoin j]
+     , attrs = Star
+     , criteria = []
+     , groupBy = Nothing
+     , orderBy = []
+     , limit = Nothing
+     , offset = Nothing
+     })
+
 ppSql :: Select -> Doc
 ppSql (SelectFrom s)   = ppSelectFrom s
 ppSql (Table table)    = ppTable table
@@ -195,8 +235,7 @@ ppSelectJoin :: Join -> Doc
 ppSelectJoin j =
   group
     (vsep
-       [ oneLineOrHang ["SELECT", asterisk]
-       , oneLineOrHang ["FROM", ppTableAlias (tableAlias 1 s1)]
+       [ ppTableAlias (tableAlias 1 s1)
        , oneLineOrHang
            [ ppJoinType (jJoinType j)
            , ppTableAlias (tableAlias 2 s2)
@@ -239,7 +278,7 @@ ppJoinType FullJoin  = "FULL OUTER JOIN"
 ppAttrs :: SelectAttrs -> Doc
 ppAttrs Star                 = asterisk
 ppAttrs (SelectAttrs xs)     = fillSep (punctuate comma (map nameAs (toList xs)))
-ppAttrs (SelectAttrsStar xs) = fillSep (punctuate comma (map nameAs (toList xs) ++ ["*"]))
+ppAttrs (SelectAttrsStar xs) = fillSep (punctuate comma (map nameAs (toList xs) ++ [asterisk]))
 
 -- This is pretty much just nameAs from HaskellDB
 nameAs :: (SqlExpr, Maybe SqlColumn) -> Doc
@@ -262,11 +301,11 @@ ppTableAlias :: (TableAlias, Select) -> Doc
 ppTableAlias (alias, select) = ppAs (Just alias) $ case select of
   Table table           -> ppTable table
   RelExpr expr          -> ppSqlExpr expr
-  SelectFrom selectFrom -> parens (ppSelectFrom selectFrom)
-  SelectJoin slj        -> parens (ppSelectJoin slj)
-  SelectValues slv      -> parens (ppSelectValues slv)
-  SelectBinary slb      -> parens (ppSelectBinary slb)
-  SelectLabel sll       -> parens (ppSelectLabel sll)
+  SelectFrom selectFrom -> parens (align (ppSelectFrom selectFrom))
+  SelectJoin slj        -> parens (align (ppSelectJoin slj))
+  SelectValues slv      -> parens (align (ppSelectValues slv))
+  SelectBinary slb      -> parens (align (ppSelectBinary slb))
+  SelectLabel sll       -> parens (align (ppSelectLabel sll))
 
 ppGroupByOptional :: Maybe (NEL.NonEmpty SqlExpr) -> Doc
 ppGroupByOptional Nothing   = empty
