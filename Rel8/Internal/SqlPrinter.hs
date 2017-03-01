@@ -129,19 +129,21 @@ ppSqlExpr expr =
   case expr of
     ColumnSqlExpr c -> ppSqlColumn c
     CompositeSqlExpr s x -> parens (ppSqlExpr s) <> "." <> text (pack x)
-    ParensSqlExpr e -> parens (ppSqlExpr e)
-    BinSqlExpr op e1 e2 -> hsep [ppSqlExpr e1, text (pack op), ppSqlExpr e2]
+    ParensSqlExpr e -> parens (align (ppSqlExpr e))
+    BinSqlExpr op e1 e2 ->
+      group (vsep [hsep [ppSqlExpr e1, text (pack op)], ppSqlExpr e2])
     PrefixSqlExpr op e -> hsep [text (pack op), ppSqlExpr e]
     PostfixSqlExpr op e -> hsep [ppSqlExpr e, text (pack op)]
     ConstSqlExpr c -> text (pack c)
     CaseSqlExpr cs el ->
-      align
-        (vsep
-           [ "CASE"
-           , indent 2 (vsep (toList (fmap ppWhen cs)))
-           , indent 2 (oneLineOrHang ["ELSE", ppSqlExpr el])
-           , "END"
-           ])
+      group
+        (align
+           (vsep
+              [ "CASE"
+              , indent 2 (vsep (toList (fmap ppWhen cs)))
+              , indent 2 (oneLineOrHang ["ELSE", ppSqlExpr el])
+              , "END"
+              ]))
       where ppWhen (w, t) =
               oneLineOrHang [hsep ["WHEN", ppSqlExpr w, "THEN"], ppSqlExpr t]
     ListSqlExpr es -> compactTuple (map ppSqlExpr (toList es))
@@ -158,13 +160,21 @@ ppSqlExpr expr =
     RangeSqlExpr start end ->
       hsep (punctuate comma [ppStartBound start, ppEndBound end])
     FunSqlExpr f es -> text (pack f) <> compactTuple (map ppSqlExpr es)
-    -- AggrFunSqlExpr f es ord ->
-    --   hcat
-    --     [ text (pack f)
-    --     , parens
-    --         (hcat
-    --            [align (fillSep (punctuate comma (map ppSqlExpr es))), brackets])
-    --     ]
+    AggrFunSqlExpr f es ord distinct ->
+      hcat
+        [ text (pack f)
+        , parens
+            (align
+               (hsep
+                  [ ppSqlDistinct distinct
+                  , fillSep (punctuate comma (map ppSqlExpr es))
+                  , ppOrderBy ord
+                  ]))
+        ]
+
+ppSqlDistinct :: SqlDistinct -> Doc
+ppSqlDistinct SqlDistinct = text "DISTINCT"
+ppSqlDistinct SqlNotDistinct = mempty
 
 -- | Top-level pretty printer.
 ppSelect :: Select -> Doc
@@ -205,15 +215,34 @@ ppSelect (SelectJoin j) =
      , limit = Nothing
      , offset = Nothing
      })
+ppSelect (SelectAntijoin aj) = ppSelectAntijoin aj
+
+ppSelectAntijoin :: Antijoin -> Doc
+ppSelectAntijoin (Antijoin a b) =
+  vsep
+    [ ppSelect
+        (SelectFrom
+           From
+           { tables = [a]
+           , attrs = Star
+           , criteria = []
+           , groupBy = Nothing
+           , orderBy = []
+           , limit = Nothing
+           , offset = Nothing
+           })
+    , hsep ["WHERE", "NOT", "EXISTS", parens (align (ppSql b))]
+    ]
 
 ppSql :: Select -> Doc
-ppSql (SelectFrom s)   = ppSelectFrom s
-ppSql (Table table)    = ppTable table
-ppSql (RelExpr expr)   = ppSqlExpr expr
-ppSql (SelectJoin j)   = ppSelectJoin j
-ppSql (SelectValues v) = ppSelectValues v
-ppSql (SelectBinary v) = ppSelectBinary v
-ppSql (SelectLabel v)  = ppSelectLabel v
+ppSql (SelectFrom s)     = ppSelectFrom s
+ppSql (Table table)      = ppTable table
+ppSql (RelExpr expr)     = ppSqlExpr expr
+ppSql (SelectJoin j)     = ppSelectJoin j
+ppSql (SelectValues v)   = ppSelectValues v
+ppSql (SelectBinary v)   = ppSelectBinary v
+ppSql (SelectLabel v)    = ppSelectLabel v
+ppSql (SelectAntijoin a) = ppSelectAntijoin a
 
 ppSelectFrom :: From -> Doc
 ppSelectFrom s =
@@ -306,6 +335,7 @@ ppTableAlias (alias, select) = ppAs (Just alias) $ case select of
   SelectValues slv      -> parens (align (ppSelectValues slv))
   SelectBinary slb      -> parens (align (ppSelectBinary slb))
   SelectLabel sll       -> parens (align (ppSelectLabel sll))
+  SelectAntijoin aj     -> parens (align (ppSelectAntijoin aj))
 
 ppGroupByOptional :: Maybe (NEL.NonEmpty SqlExpr) -> Doc
 ppGroupByOptional Nothing   = empty
