@@ -1,5 +1,4 @@
 {-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RecordWildCards #-}
 module Rel8.Internal.SqlTransformations where
 
@@ -19,9 +18,11 @@ import Opaleye.Internal.Sql as O
 
 --------------------------------------------------------------------------------
 -- | Traversal suitable for use with @Control.Lens.Plate@. Selects the immediate
--- Selects within a Select.
+-- 'Select's within a 'Select'.
 
-selectPlate :: Applicative f => (O.Select -> f O.Select) -> O.Select -> f O.Select
+selectPlate
+  :: Applicative f
+  => (O.Select -> f O.Select) -> O.Select -> f O.Select
 selectPlate f (SelectFrom From {..}) =
   SelectFrom <$>
     (From <$> pure attrs
@@ -46,7 +47,7 @@ selectPlate _ other = pure other
 
 
 --------------------------------------------------------------------------------
--- | Traverse all SqlExprs in a Select
+-- | Traverse all 'SqlExpr's in a 'Select' (but not sub-expressions)
 
 selectExprs :: Applicative f => (SqlExpr -> f SqlExpr) -> O.Select -> f O.Select
 selectExprs f (SelectFrom From{..}) =
@@ -78,7 +79,7 @@ selectExprs _ other = pure other
 
 
 --------------------------------------------------------------------------------
--- | Traverse all SqlExprs in SelectAttrs
+-- | Traverse all 'SqlExpr's in 'SelectAttrs'
 
 traverseAttrs :: Applicative f => (SqlExpr -> f SqlExpr) -> SelectAttrs -> f SelectAttrs
 traverseAttrs f (SelectAttrs a) = SelectAttrs <$> (traverse._1) f a
@@ -87,16 +88,18 @@ traverseAttrs _ other = pure other
 
 
 --------------------------------------------------------------------------------
+-- | Traverse both sides of a homogeneous tuple.
 both :: Applicative f => (t -> f b) -> (t, t) -> f (b, b)
 both f (a,b) = liftA2 (,) (f a) (f b)
 
+-- | Traverse into the first element of a 2-tuple.
 _1 :: Applicative f => (t -> f a) -> (t, b) -> f (a, b)
 _1 f (a, b) = liftA2 (,) (f a) (pure b)
 
 
 --------------------------------------------------------------------------------
 -- | Traversal suitable for use with @Control.Lens.Plate@. Selects the immediate
--- SqlExprs within a SqlExpr.
+-- 'SqlExpr's within a 'SqlExpr'.
 
 traverseExpr :: (SqlExpr -> Identity SqlExpr) -> SqlExpr -> Identity SqlExpr
 traverseExpr f (CompositeSqlExpr expr s) = CompositeSqlExpr <$> f expr <*> pure s
@@ -237,6 +240,15 @@ unselectRedundantColumns =
     exprReferences (ParensSqlExpr a) = exprReferences a
     exprReferences (CastSqlExpr _ a) = exprReferences a
     exprReferences (ArraySqlExpr a) = foldMap exprReferences a
+    exprReferences (AggrFunSqlExpr _ es ord _) =
+      foldMap exprReferences es <>
+      foldMap (exprReferences . fst) ord
+    exprReferences PlaceHolderSqlExpr = mempty
+    exprReferences DefaultSqlExpr = mempty
+    exprReferences (RangeSqlExpr a b) = fromRange a <> fromRange b where
+      fromRange (Inclusive expr) = exprReferences expr
+      fromRange (Exclusive expr) = exprReferences expr
+      fromRange _ = mempty
 
     unColumn (SqlColumn name) = name
 
