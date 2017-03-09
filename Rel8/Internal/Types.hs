@@ -1,12 +1,14 @@
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Rel8.Internal.Types where
 
-import GHC.TypeLits (Symbol)
-import Rel8.Internal.Expr (Expr)
+import Rel8.Internal.Expr
 import qualified Opaleye.Internal.HaskellDB.PrimQuery as O
 
 --------------------------------------------------------------------------------
@@ -18,16 +20,14 @@ data QueryResult column
 -- Used to indicate that we will be inserting values. If columns are marked as
 -- having a default value, it will be possible to use 'Default' to let the
 -- database generate a value.
-data Insert a
+data Insert a = InsertExpr (Expr a)
 
 
 --------------------------------------------------------------------------------
 -- | Used internal to reflect the schema of a table from types into values.
-data Schema a
-
---------------------------------------------------------------------------------
-data SchemaInfo (name :: Symbol) (hasDefault :: HasDefault) t =
+data SchemaInfo a =
   SchemaInfo String
+  deriving (Show)
 
 
 --------------------------------------------------------------------------------
@@ -41,7 +41,6 @@ data SchemaInfo (name :: Symbol) (hasDefault :: HasDefault) t =
 data Default a
   = OverrideDefault a
   | InsertDefault
-
 
 --------------------------------------------------------------------------------
 {-| All metadata about a column in a table.
@@ -59,7 +58,7 @@ data Default a
 type family C f columnName hasDefault columnType :: * where
   C Expr _name _def t = Expr t
   C QueryResult _name _def t = t
-  C Schema name hasDefault t = SchemaInfo name hasDefault t
+  C SchemaInfo name hasDefault t = SchemaInfo '(name, hasDefault, t)
   C Insert name 'HasDefault t = Default (Expr t)
   C Insert name 'NoDefault t = Expr t
   C Aggregate name _ t = Aggregate t
@@ -69,6 +68,18 @@ type family Anon f columnType :: * where
   Anon Expr t = Expr t
   Anon QueryResult t = t
   Anon Aggregate t = Aggregate t
+
+newtype Limit f = Limit
+  { runLimit :: forall a. f a
+  }
+
+data Colimit f where
+  Colimit :: f a -> Colimit f
+
+data Interpretation f where
+  AsExpr :: Interpretation Expr
+  AsSchemaInfo :: Interpretation SchemaInfo
+  AsInsert :: Interpretation Insert
 
 --------------------------------------------------------------------------------
 -- | Indicate whether or not a column has a default value. Used in conjunction
