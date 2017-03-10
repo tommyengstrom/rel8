@@ -492,18 +492,7 @@ tableDefinitionUpdate =
 -- | 'AggregateTable' is used to demonstrate that a table only contains
 -- aggregation or @GROUP BY@ expressions. If you wish to use your own records
 -- for aggregation results, parameterise the record over @f@, use 'Anon' to
--- specify the columns, and then generically derive 'AggregateTable':
---
--- __Example__
---
--- @
--- data UserInfo f = UserInfo
---   { userCount :: Anon f Int64
---   , latestLogin :: Anon f UTCTime
---   } deriving (Generic)
--- instance AggregateTable (UserInfo Aggregate) (UserInfo Expr)
--- @
-
+-- specify the columns, and then generically derive 'AggregateTable'
 class AggregateTable columns result | columns -> result, result -> columns where
   aggregations :: Iso' columns (RowF result (Limit Aggregate))
 

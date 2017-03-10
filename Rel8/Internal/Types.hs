@@ -48,7 +48,7 @@ data Default a
     'C' is used to specify information about individual columns in base
     tables.
 
-    === __Example__
+    === Example
 
     @
     data Employee f =
@@ -63,7 +63,28 @@ type family C f columnName hasDefault columnType :: * where
   C Insert name 'NoDefault t = Expr t
   C Aggregate name _ t = Aggregate t
 
-
+-- | @Anon@ can be used to define columns like 'C', but does not contain the
+-- extra metadata needed to define a 'BaseTable' instance. The main use of
+-- 'Anon' is to define "anonymous" tables that represent the intermediate
+-- parts of a query.
+--
+-- === Example
+--
+-- @
+-- data EmployeeAndManager f = EmployeeAndManager
+--   { employee :: Anon f Text
+--   , manager :: Anon f Text
+--   }
+--
+-- employeeAndManager :: Query (EmployeeAndManager Expr)
+-- employeeAndManager = proc _ -> do
+--   employee <- queryTable -< ()
+--   manager <- queryTable -< ()
+--   where_ -< employeeManager employee ==. managerId manager
+--   id -< EmployeeAndManager { employee = employeeName employee
+--                            , manager = managerName manager
+--                            }
+-- @
 type family Anon f columnType :: * where
   Anon Expr t = Expr t
   Anon QueryResult t = t
