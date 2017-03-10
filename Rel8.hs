@@ -312,6 +312,7 @@ unionAll =
      } deriving (Generic)
 
    instance 'BaseTable' Part where 'tableName' = \"part\"
+   instance 'Table' (Part 'Expr') (Part 'QueryResult')
    @
 
    The @Part@ table has 5 columns, each defined with the @C f ..@
@@ -323,9 +324,11 @@ unionAll =
       managed by the database.
    3. The type of the column.
 
-   After defining the table, we finally need to make an instance of 'BaseTable'
-   so @rel8@ can query this table. By using @deriving (Generic)@, we simply need
-   to write @instance BaseTable Part where tableName = "part"@.
+   After defining the table, we finally need to make instances of 'BaseTable' and
+   'Table' so @rel8@ can query this table. By using @deriving (Generic)@, we
+   simply need to write @instance BaseTable Part where tableName = "part"@. The
+   'Table' instance demonstrates that a @Part Expr@ value can be selected from
+   the database as @Part QueryResult@.
 
    === Querying tables
 
@@ -397,6 +400,7 @@ unionAll =
      } deriving (Generic)
 
    instance 'BaseTable' Supplier where 'tableName' = "supplier"
+   instance 'Table' (Supplier 'Expr') (Supplier 'QueryResult')
    @
 
    We can take the product of all parts paired against all suppliers:
