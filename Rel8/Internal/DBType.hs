@@ -18,6 +18,8 @@ module Rel8.Internal.DBType
   , compositeDBType
   ) where
 
+import qualified Hasql.Encoders as Encoder
+import qualified Hasql.Decoders as Decoder
 import Control.Category ((.))
 import Data.Aeson (Value)
 import Data.ByteString (ByteString)
@@ -35,7 +37,6 @@ import Data.Time (UTCTime, Day, LocalTime, TimeOfDay)
 import Data.Typeable (Typeable)
 import Data.UUID (UUID)
 import Data.Vector (Vector)
-import Database.PostgreSQL.Simple.FromField (FromField)
 import Generics.OneLiner
        (For(..), ADT, Constraints, gfoldMap)
 import qualified Opaleye.Column as O
@@ -157,7 +158,7 @@ instance DBType Scientific where
 instance DBType Value where
   dbTypeInfo = typeInfoFromOpaleye O.pgValueJSON
 
-instance (DBType a, Typeable a) =>
+instance (DBType a) =>
          DBType (Vector a) where
   dbTypeInfo =
     TypeInfo
@@ -180,12 +181,14 @@ instance (DBType a, Typeable a) =>
 --
 -- By default, if @a@ has a 'Show' instance, we define 'dbTypeInfo' to use
 -- 'showableDbType'.
-class FromField a => DBType a where
+class DBType a where
   dbTypeInfo :: TypeInfo a
 
   default dbTypeInfo :: Show a => TypeInfo a
   dbTypeInfo = showableDbType
 
+  valueEncoder :: Encoder.Value a
+  valueDecoder :: Decoder.Value a
 
 --------------------------------------------------------------------------------
 -- | Map an @opaleye@ function that forms 'O.Column's into a @rel8@ 'TypeInfo'.

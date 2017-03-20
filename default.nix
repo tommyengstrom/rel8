@@ -1,7 +1,7 @@
 { mkDerivation, base, one-liner, opaleye, postgresql-simple
 , product-profunctors, profunctors, scientific, stdenv, streaming
 , tagged, text, exceptions, free, streaming-postgresql-simple
-, lens
+, lens, hasql
 }:
 mkDerivation {
   pname = "rel8";
@@ -10,7 +10,7 @@ mkDerivation {
   libraryHaskellDepends = [
     base one-liner opaleye postgresql-simple product-profunctors
     profunctors scientific streaming tagged text exceptions free
-    streaming-postgresql-simple lens
+    streaming-postgresql-simple lens hasql
   ];
   license = stdenv.lib.licenses.bsd3;
 }

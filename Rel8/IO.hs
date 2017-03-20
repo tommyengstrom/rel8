@@ -15,93 +15,100 @@ module Rel8.IO
 
     -- * @DELETE@
   , delete
-
-    -- * Streaming results
-  , QueryRunner
-  , stream
-  , streamCursor
   ) where
 
-import Control.Lens (nullOf)
-import Control.Monad (void)
-import Control.Monad.Catch (MonadMask)
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Trans.Resource (MonadResource, runResourceT)
+import Control.Arrow
+import Control.Foldl
+import Data.ByteString (ByteString)
 import Data.Int (Int64)
 import qualified Data.List.NonEmpty as NEL
-import Data.Maybe (fromJust)
-import Data.String (fromString)
-import Database.PostgreSQL.Simple (Connection)
-import Database.PostgreSQL.Simple (defaultFoldOptions)
-import qualified Database.PostgreSQL.Simple as Pg
-import qualified Database.PostgreSQL.Simple.FromRow as Pg
-import Database.PostgreSQL.Simple.Streaming
-       (queryWith_, streamWithOptionsAndParser_)
+import Data.Text (pack)
+import Data.Text.Encoding (encodeUtf8)
+import qualified Hasql.Decoders as Hasql
+import qualified Hasql.Encoders as Encode
+import qualified Hasql.Query as Hasql
 import qualified Opaleye as O
-import qualified Opaleye.Internal.RunQuery as O
+import qualified Opaleye.Internal.Column as O
+import qualified Opaleye.Internal.HaskellDB.PrimQuery as O
+import qualified Opaleye.Internal.HaskellDB.Sql as O
+import qualified Opaleye.Internal.HaskellDB.Sql.Default as O
+import qualified Opaleye.Internal.HaskellDB.Sql.Generate as O
+import qualified Opaleye.Internal.HaskellDB.Sql.Print as O
+import qualified Opaleye.Internal.Optimize as O
+import qualified Opaleye.Internal.PrimQuery as O
+import qualified Opaleye.Internal.Print as O
+import qualified Opaleye.Internal.QueryArr as O
+import qualified Opaleye.Internal.Sql as O (sql)
+import qualified Opaleye.Internal.Sql as Sql
 import qualified Opaleye.Internal.Table as O
+import qualified Opaleye.Internal.Tag as O
+import qualified Opaleye.Internal.Unpackspec as O
 import Rel8.Internal.Expr
 import Rel8.Internal.Operators
 import Rel8.Internal.Table hiding (columns)
 import Rel8.Internal.Types
-import Streaming (Stream, Of)
-import qualified Streaming.Prelude as S
 
 --------------------------------------------------------------------------------
--- | A suitable way to execute a query and stream the results.
+-- | Transform a Rel8 query (that may contain parameters) into a Hasql 'Query'.
 --
--- @rel8@ provides 'stream' and 'streamCursor', but you are free to provide
--- your own query runners.
-type QueryRunner m = forall a. Pg.RowParser a -> Pg.Query -> Stream (Of a) m ()
-
--- | Stream the results of a single query incrementally. This runner essentially
--- blocks subsequent queries on a connection until the stream is exhausted. Thus
--- it is /not/ possible to map over the results of a query and perform subsequent
--- queries on the same connection. If you need this, use 'streamCursor'.
+-- The supplied 'Fold' instructs how multiple rows are combined into the final
+-- Haskell query result - if you just want a list of all rows, use 'list' or
+-- 'vector'.
 --
--- @
--- 'stream' = 'queryWith_'
--- @
-stream :: (MonadResource m) => Connection -> QueryRunner m
-stream conn parser query = queryWith_ parser conn query
-
--- | Stream the results of a query and fetch the results using a PostgreSQL
--- cursor. This variation is slightly more expensive, but has the benefit that
--- you can run other queries on the same connection while results are being
--- streamed.
--- @
--- 'streamCursor' = 'streamWithOptionsAndParser_' 'defaultFoldOptions'
--- @
-streamCursor :: (MonadResource m, MonadMask m) => Connection -> QueryRunner m
-streamCursor conn parser query =
-  streamWithOptionsAndParser_ defaultFoldOptions parser conn query
-
---------------------------------------------------------------------------------
--- | Given a database query, execute this query and return a 'Stream' of
--- results. This runs a @SELECT@ statement.
+-- To run the resulting 'Hasql.Query', use @Hasql.Sesison.query@ or
+-- @Hasql.Transaction.query@.
 select
-  :: (MonadIO m, Table rows results)
-  => QueryRunner m -> O.Query rows -> Stream (Of results) m ()
-select io query =
-  runQueryExplicit io queryRunner query
+  :: (Table row result)
+  => O.Query row -> Fold result results -> Hasql.Query () results
+select q (Fold step begin done) =
+  case prepareQuery unpackColumns q of
+    Nothing -> arr (const (done begin))
+    Just sql ->
+      Hasql.statement
+        sql
+        Encode.unit
+        (fmap done (Hasql.foldlRows step begin rowParser))
+        True
 
 -- | Insert rows into a 'BaseTable'. This runs a @INSERT@ statement.
 insert
-  :: (BaseTable table, MonadIO m)
-  => Connection -> [table Insert] -> m Int64
-insert conn rows =
-  liftIO (O.runInsertMany conn tableDefinition rows)
+  :: (BaseTable table)
+  => [table Insert] -> Hasql.Query () Int64
+insert rows =
+  case NEL.nonEmpty rows of
+    Nothing ->
+      -- Inserting the empty list is just the same as returning 0
+      arr (const 0)
+    Just columns' ->
+      Hasql.statement
+        (encodeUtf8 (pack (arrangeInsertManySql tableDefinition columns')))
+        Encode.unit
+        Hasql.rowsAffected
+        False
 
 -- | Insert rows into a 'BaseTable', and return the inserted rows. This runs a
 -- @INSERT ... RETURNING@ statement, and be useful to immediately retrieve
 -- any default values (such as automatically generated primary keys).
 insertReturning
-  :: (BaseTable table, MonadIO m)
-  => QueryRunner m
-  -> [table Insert]
-  -> Stream (Of (table QueryResult)) m ()
-insertReturning io rows =
-  runInsertManyReturningExplicit io queryRunner tableDefinition rows id
+  :: (BaseTable table)
+  => [table Insert]
+  -> Fold (table QueryResult) results
+  -> Hasql.Query () results
+insertReturning rows (Fold step begin done) =
+  case NEL.nonEmpty rows of
+    Nothing -> arr (const (done begin))
+    Just columns' ->
+      Hasql.statement
+        (encodeUtf8
+           (pack
+              (arrangeInsertManyReturningSql
+                 unpackColumns
+                 tableDefinition
+                 columns'
+                 id)))
+        Encode.unit
+        (done <$> Hasql.foldlRows step begin rowParser)
+        False
 
 -- | Insert a single row 'BaseTable', and return the inserted row. This runs a
 -- @INSERT ... RETURNING@ statement, and be useful to immediately retrieve
@@ -112,107 +119,175 @@ insertReturning io rows =
 -- tables that prevent the row from being inserted. If this could happen,
 -- consider 'insertReturning'.
 insert1Returning
-  :: (BaseTable table, MonadIO m)
-  => Connection -> table Insert -> m (table QueryResult)
-insert1Returning c =
-  liftIO .
-  runResourceT . fmap fromJust . S.head_ . insertReturning (stream c) . pure
+  :: (BaseTable table)
+  => table Insert -> Hasql.Query () (table QueryResult)
+insert1Returning row =
+  Hasql.statement
+    (encodeUtf8
+       (pack
+          (arrangeInsertManyReturningSql
+             unpackColumns
+             tableDefinition
+             (pure row)
+             id)))
+    Encode.unit
+    (Hasql.singleRow rowParser)
+    False
 
 -- | Update rows in a 'BaseTable'. Corresponds to @UPDATE@.
 update
-  :: (BaseTable table, Predicate bool, MonadIO m)
-  => Connection
-  -> (table Expr -> Expr bool)
+  :: (BaseTable table, Predicate bool)
+  => (table Expr -> Expr bool)
      -- ^ A predicate specifying which rows should be updated.
   -> (table Expr -> table Expr)
      -- ^ The transformation to apply to each row. This function is given the
      -- rows current value as input.
-  -> m Int64
+  -> Hasql.Query () Int64
      -- ^ The amount of rows updated.
-update conn f up =
-  liftIO $
-  O.runUpdate
-    conn
-    tableDefinitionUpdate
-    up
-    (exprToColumn . toNullable . f)
+update f up =
+  Hasql.statement
+    (encodeUtf8
+       (pack
+          (arrangeUpdateSql
+             tableDefinitionUpdate
+             up
+             (exprToColumn . toNullable . f))))
+    Encode.unit
+    Hasql.rowsAffected
+    False
 
 -- | Update rows in a 'BaseTable' and return the results. Corresponds to
 -- @UPDATE ... RETURNING@.
 updateReturning
   :: (BaseTable table, Predicate bool)
-  => QueryRunner m
-  -> (table Expr -> Expr bool)
+  => (table Expr -> Expr bool)
   -> (table Expr -> table Expr)
-  -> Stream (Of (table QueryResult)) m ()
-updateReturning io f up = do
-  runUpdateReturningExplicit
-    io
-    queryRunner
-    tableDefinitionUpdate
-    up
-    (exprToColumn . toNullable . f)
-    id
+  -> Fold (table QueryResult) results
+  -> Hasql.Query () results
+updateReturning f up (Fold step begin done) =
+  Hasql.statement
+    (encodeUtf8
+       (pack
+          (arrangeUpdateSql
+             tableDefinitionUpdate
+             up
+             (exprToColumn . toNullable . f))))
+    Encode.unit
+    (done <$> Hasql.foldlRows step begin rowParser)
+    False
 
 -- | Given a 'BaseTable' and a predicate, @DELETE@ all rows that match.
 delete
   :: (BaseTable table, Predicate bool)
-  => Connection -> (table Expr -> Expr bool) -> IO Int64
-delete conn f =
-  O.runDelete conn tableDefinition (exprToColumn . toNullable . f)
-
-queryRunner :: Table a b => O.QueryRunner a b
-queryRunner =
-  O.QueryRunner (void unpackColumns)
-                (const rowParser)
-                (Prelude.not . nullOf (expressions . traverse))
+  => (table Expr -> Expr bool) -> Hasql.Query () Int64
+delete f =
+  Hasql.statement
+    (encodeUtf8 (pack (arrangeDeleteSql tableDefinition (exprToColumn . toNullable . f))))
+    Encode.unit
+    Hasql.rowsAffected
+    False
 
 --------------------------------------------------------------------------------
 
-runQueryExplicit
-  :: Monad m
-  => QueryRunner m
-  -> O.QueryRunner columns haskells
-  -> O.Query columns
-  -> Stream (Of haskells) m ()
-runQueryExplicit io qr q = maybe (return ()) (io parser) sql
-  where (sql, parser) = O.prepareQuery qr q
-
-runInsertManyReturningExplicit
-  :: Monad m
-  => QueryRunner m
-  -> O.QueryRunner columnsReturned haskells
-  -> O.Table columnsW columnsR
-  -> [columnsW]
-  -> (columnsR -> columnsReturned)
-  -> Stream (Of haskells) m ()
-runInsertManyReturningExplicit io qr t columns r =
-  case NEL.nonEmpty columns of
-    Nothing -> return ()
-    Just columns' ->
-      io parser (fromString (O.arrangeInsertManyReturningSql u t columns' r))
+prepareQuery :: O.Unpackspec columns a
+             -> O.Query columns
+             -> Maybe ByteString
+prepareQuery u q = fmap (encodeUtf8 . pack) sql
   where
-    O.QueryRunner u _ _ = qr
-    parser = O.prepareRowParser qr (r v)
-    v =
-      case t of
-        O.Table _ (O.TableProperties _ (O.View a)) -> a
-        O.TableWithSchema _ _ (O.TableProperties _ (O.View a)) -> a
+    (_, sql) = showSqlExplicit u q
 
-runUpdateReturningExplicit
-  :: QueryRunner m
-  -> O.QueryRunner columnsReturned haskells
+showSqlExplicit :: O.Unpackspec s t -> O.QueryArr () s -> (s, Maybe String)
+showSqlExplicit up q =
+  case O.runSimpleQueryArrStart q () of
+    (x, y, z) -> (x, (formatAndShowSQL (O.collectPEs up x, O.optimize y, z)))
+
+formatAndShowSQL
+  :: ([O.PrimExpr],O.PrimQuery' a,O.Tag) -> Maybe String
+formatAndShowSQL =
+  fmap (show . O.ppSql . O.sql) . traverse2Of3 O.removeEmpty
+  where
+        -- Just a lens
+        traverse2Of3
+          :: Functor f
+          => (a -> f b) -> (x,a,y) -> f (x,b,y)
+        traverse2Of3 f (x,y,z) =
+          fmap (\y' -> (x,y',z))
+               (f y)
+
+arrangeInsertMany :: O.Table columns a -> NEL.NonEmpty columns -> O.SqlInsert
+arrangeInsertMany table columns = insert'
+  where
+    writer = O.tablePropertiesWriter (O.tableProperties table)
+    (columnExprs, columnNames) = O.runWriter' writer columns
+    insert' =
+      O.sqlInsert
+        O.defaultSqlGenerator
+        (O.tiToSqlTable (O.tableIdentifier table))
+        columnNames
+        columnExprs
+
+arrangeInsertManySql :: O.Table columns a -> NEL.NonEmpty columns -> String
+arrangeInsertManySql t cs = show (O.ppInsert (arrangeInsertMany t cs))
+
+arrangeInsertManyReturning
+  :: O.Unpackspec columnsReturned ignored
   -> O.Table columnsW columnsR
+  -> NEL.NonEmpty columnsW
+  -> (columnsR -> columnsReturned)
+  -> Sql.Returning O.SqlInsert
+arrangeInsertManyReturning unpackspec table columns returningf =
+  Sql.Returning insert' returningSEs
+  where
+    insert' = arrangeInsertMany table columns
+    O.View columnsR = O.tablePropertiesView (O.tableProperties table)
+    returningPEs = O.collectPEs unpackspec (returningf columnsR)
+    returningSEs = Sql.ensureColumnsGen id (map Sql.sqlExpr returningPEs)
+
+arrangeInsertManyReturningSql
+  :: O.Unpackspec columnsReturned ignored
+  -> O.Table columnsW columnsR
+  -> NEL.NonEmpty columnsW
+  -> (columnsR -> columnsReturned)
+  -> String
+arrangeInsertManyReturningSql a b c d =
+  show (O.ppInsertReturning (arrangeInsertManyReturning a b c d))
+
+arrangeUpdate
+  :: O.Table columnsW columnsR
   -> (columnsR -> columnsW)
   -> (columnsR -> O.Column O.PGBool)
-  -> (columnsR -> columnsReturned)
-  -> Stream (Of haskells) m ()
-runUpdateReturningExplicit io qr t up cond r =
-  io parser (fromString (O.arrangeUpdateReturningSql u t up cond r))
+  -> O.SqlUpdate
+arrangeUpdate table updateF cond =
+  O.sqlUpdate
+    O.defaultSqlGenerator
+    (O.tiToSqlTable (O.tableIdentifier table))
+    [condExpr]
+    (update' tableCols)
   where
-    O.QueryRunner u _ _ = qr
-    parser = O.prepareRowParser qr (r v)
-    v =
-      case t of
-        O.Table _ (O.TableProperties _ (O.View a)) -> a
-        O.TableWithSchema _ _ (O.TableProperties _ (O.View a)) -> a
+    O.TableProperties writer (O.View tableCols) = O.tableProperties table
+    update' = map (\(x, y) -> (y, x)) . O.runWriter writer . updateF
+    O.Column condExpr = cond tableCols
+
+arrangeUpdateSql
+  :: O.Table columnsW columnsR
+  -> (columnsR -> columnsW)
+  -> (columnsR -> O.Column O.PGBool)
+  -> String
+arrangeUpdateSql a b c = show (O.ppUpdate (arrangeUpdate a b c))
+
+arrangeDelete :: O.Table a columnsR
+              -> (columnsR -> O.Column O.PGBool)
+              -> O.SqlDelete
+arrangeDelete table cond =
+  O.sqlDelete
+    O.defaultSqlGenerator
+    (O.tiToSqlTable (O.tableIdentifier table))
+    [condExpr]
+  where
+    O.Column condExpr = cond tableCols
+    O.View tableCols = O.tablePropertiesView (O.tableProperties table)
+
+arrangeDeleteSql :: O.Table a columnsR
+                 -> (columnsR -> O.Column O.PGBool)
+                 -> String
+arrangeDeleteSql a b = show (O.ppDelete (arrangeDelete a b))

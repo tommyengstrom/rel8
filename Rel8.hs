@@ -99,7 +99,7 @@ module Rel8
   , QueryResult, SchemaInfo
 
     -- * Re-exported symbols
-  , Connection, Stream, Of, Generic
+  , Stream, Of, Generic
 
     -- * Unsafe routines
   , unsafeCoerceExpr
@@ -110,16 +110,14 @@ module Rel8
   , dbBinOp
   ) where
 
-import Data.Functor.Rep (mzipWithRep)
 import Control.Applicative (liftA2)
 import Control.Category ((.), id)
 import Control.Lens (view, from)
-import Control.Monad.Rel8
+import Data.Functor.Rep (mzipWithRep)
 import Data.List (foldl')
 import Data.Profunctor (lmap)
 import Data.Text (Text)
 import Data.Time (UTCTime)
-import Database.PostgreSQL.Simple (Connection)
 import GHC.Generics (Generic)
 import qualified Opaleye.Binary as O
 import qualified Opaleye.Column as O
@@ -129,8 +127,8 @@ import qualified Opaleye.Internal.Column as O
 import qualified Opaleye.Internal.Distinct as O
 import qualified Opaleye.Internal.HaskellDB.PrimQuery as O
 import qualified Opaleye.Internal.Join as O
-import qualified Opaleye.Internal.PackMap as O
 import qualified Opaleye.Internal.PGTypes as O
+import qualified Opaleye.Internal.PackMap as O
 import qualified Opaleye.Internal.PrimQuery as PrimQuery
 import qualified Opaleye.Internal.QueryArr as O
 import qualified Opaleye.Internal.Unpackspec as O
@@ -138,6 +136,7 @@ import qualified Opaleye.Join as O
 import qualified Opaleye.Operators as O
 import qualified Opaleye.Order as O
 import Prelude hiding (not, (.), id)
+import Rel8.IO
 import Rel8.Internal
 import Streaming (Of, Stream)
 

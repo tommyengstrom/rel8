@@ -15,12 +15,11 @@
 -- | This module defines the 'Table' type class.
 module Rel8.Internal.Table where
 
-import Data.Proxy
-import GHC.TypeLits
 import Control.Applicative
 import Control.Lens (Iso', from, iso, view)
 import Control.Monad (replicateM_)
 import Data.Aeson (FromJSON, ToJSON)
+import Data.Default.Class (def)
 import Data.Foldable (traverse_)
 import Data.Functor.Identity
 import Data.Functor.Product
@@ -28,12 +27,14 @@ import Data.Functor.Rep (Representable, index, tabulate, pureRep)
 import qualified Data.Functor.Rep as Representable
 import Data.Maybe (fromMaybe)
 import Data.Profunctor (dimap)
+import Data.Proxy
 import Data.Tagged (Tagged(..), untag)
-import Database.PostgreSQL.Simple.FromRow (RowParser, field)
 import GHC.Generics
        ((:*:)(..), Generic, K1(..), M1(..), Rep, to)
 import GHC.Generics.Lens (generic, _M1, _K1)
+import GHC.TypeLits
 import Generics.OneLiner (nullaryOp, ADTRecord, Constraints, For(..))
+import Hasql.Decoders (Row, value, nullableValue)
 import qualified Opaleye.Aggregate as O
 import qualified Opaleye.Column as O
 import qualified Opaleye.Internal.Aggregate as O
@@ -87,12 +88,12 @@ class (Representable (RowF expr), Traversable (RowF expr)) =>
   -- retrieved from the database. A generic implementation is provided which
   -- assumes that every field in @haskell@ represents exactly one column
   -- in the result.
-  rowParser :: RowParser haskell
+  rowParser :: Row haskell
 
   default
     rowParser
       :: (Generic haskell, GTable (Rep expr) (Rep haskell))
-      => RowParser haskell
+      => Row haskell
   rowParser = fmap to growParser
 
   default
@@ -107,7 +108,7 @@ class (Representable (RowF expr), Traversable (RowF expr)) =>
 
 --------------------------------------------------------------------------------
 class GTable expr haskell | expr -> haskell, haskell -> expr where
-  growParser :: RowParser (haskell a)
+  growParser :: Row (haskell a)
   gexpressions :: Iso' (expr a) (MkRowF expr O.PrimExpr)
 
 instance GTable expr haskell => GTable (M1 i c expr) (M1 i c haskell) where
@@ -130,7 +131,7 @@ instance {-# OVERLAPPABLE #-}
 
 instance DBType a =>
          GTable (K1 i (Expr a)) (K1 i a) where
-  growParser = K1 <$> field
+  growParser = K1 <$> value valueDecoder
   gexpressions =
     iso
       (\(K1 (Expr prim)) -> Identity prim)
@@ -158,12 +159,12 @@ instance (Table expr haskell) => Table (MaybeTable expr) (Maybe haskell) where
               (view (from expressions) row)))
 
   rowParser = do
-    isNull' <- field
+    isNull' <- nullableValue def
     if fromMaybe True isNull'
       then Nothing <$
            replicateM_
              (length (pureRep () :: RowF expr ()))
-             (field :: RowParser (Maybe ()))
+             (nullableValue def :: Row (Maybe Bool))
       else fmap Just rowParser
 
 -- | Project an expression out of a 'MaybeTable', preserving the fact that this
@@ -228,7 +229,7 @@ newtype Col a = Col { unCol :: a }
 instance DBType a => Table (Expr a) (Col a) where
   type RowF (Expr a) = Identity
   expressions = dimap (\(Expr a) -> return a) (fmap (Expr . runIdentity))
-  rowParser = fmap Col field
+  rowParser = fmap Col (value valueDecoder)
 
 --------------------------------------------------------------------------------
 traversePrimExprs
