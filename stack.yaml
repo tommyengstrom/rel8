@@ -1,4 +1,4 @@
-resolver: lts-8.5
+resolver: lts-10.8
 
 packages:
   - location:
@@ -8,5 +8,4 @@ packages:
   - .
 
 extra-deps:
-  - one-liner-0.7
-  - streaming-postgresql-simple-0.2.0.0
+    - streaming-postgresql-simple-0.2.0.3
