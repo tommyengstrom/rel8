@@ -36,7 +36,7 @@ import Database.PostgreSQL.Simple (defaultFoldOptions)
 import qualified Database.PostgreSQL.Simple as Pg
 import qualified Database.PostgreSQL.Simple.FromRow as Pg
 import Database.PostgreSQL.Simple.Streaming
-       (queryWith_, streamWithOptionsAndParser_)
+       (streamWithOptionsAndParser_)
 import qualified Opaleye as O
 import qualified Opaleye.Internal.RunQuery as O
 import qualified Opaleye.Internal.Table as O
