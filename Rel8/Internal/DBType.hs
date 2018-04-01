@@ -36,6 +36,7 @@ import Data.Typeable (Typeable)
 import Data.UUID (UUID)
 import Data.Vector (Vector)
 import Database.PostgreSQL.Simple.FromField (FromField)
+import qualified Database.PostgreSQL.Simple.Range as PGSR
 import Generics.OneLiner (ADT, Constraints, gfoldMap)
 import qualified Opaleye.Column as O
 import qualified Opaleye.Internal.Column as O
@@ -155,6 +156,21 @@ instance DBType Scientific where
 -- | json
 instance DBType Value where
   dbTypeInfo = typeInfoFromOpaleye O.pgValueJSON
+
+instance DBType (PGSR.PGRange UTCTime) where
+  dbTypeInfo = typeInfoFromOpaleye $ \(PGSR.PGRange l r) -> O.pgRange O.pgUTCTime l r
+
+instance DBType (PGSR.PGRange LocalTime) where
+  dbTypeInfo = typeInfoFromOpaleye $ \(PGSR.PGRange l r) -> O.pgRange O.pgLocalTime l r
+
+instance DBType (PGSR.PGRange Day) where
+  dbTypeInfo = typeInfoFromOpaleye $ \(PGSR.PGRange l r) -> O.pgRange O.pgDay l r
+
+instance DBType (PGSR.PGRange Int) where
+  dbTypeInfo = typeInfoFromOpaleye $ \(PGSR.PGRange l r) -> O.pgRange O.pgInt4 l r
+
+instance DBType (PGSR.PGRange Int64) where
+  dbTypeInfo = typeInfoFromOpaleye $ \(PGSR.PGRange l r) -> O.pgRange O.pgInt8 l r
 
 instance (DBType a, Typeable a) =>
          DBType (Vector a) where
