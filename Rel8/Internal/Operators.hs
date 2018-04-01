@@ -8,7 +8,8 @@ module Rel8.Internal.Operators where
 
 import Data.Int (Int16, Int32, Int64)
 import Data.Text (Text)
-import Data.Time (UTCTime)
+import Data.Time (UTCTime, LocalTime, Day)
+import qualified Database.PostgreSQL.Simple.Range as PGSR
 import qualified Opaleye.Internal.HaskellDB.PrimQuery as O
 import qualified Opaleye.Operators as O
 import qualified Opaleye.PGTypes as O
@@ -69,6 +70,11 @@ instance DBEq Int32 where
 instance DBEq Int64 where
 instance DBEq Text where
 instance DBEq UTCTime where
+instance DBEq (PGSR.PGRange UTCTime) where
+instance DBEq (PGSR.PGRange LocalTime) where
+instance DBEq (PGSR.PGRange Day) where
+instance DBEq (PGSR.PGRange Int) where
+instance DBEq (PGSR.PGRange Int64) where
 
 
 --------------------------------------------------------------------------------
