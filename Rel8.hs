@@ -88,6 +88,9 @@ module Rel8
   , (||?), (&&?), (+?), (*?), (-?)
   , (/?)
 
+    -- ** Containment predicate operators
+  , DBInclusion (..)
+
     -- * Running Queries
     -- ** @SELECT@
   , select

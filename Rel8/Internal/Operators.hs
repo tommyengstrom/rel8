@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -18,7 +19,7 @@ import Rel8.Internal.DBType
 import Rel8.Internal.Expr
 
 --------------------------------------------------------------------------------
-infix 4 ==.,  <. , <=. , >. , >=.
+infix 4 ==.,  <. , <=. , >. , >=., <@., @>.
 infixr 2 ||.
 infixr 3 &&.
 
@@ -116,3 +117,24 @@ case_ cases defaultCase =
              (exprToColumn (toNullable predicate), exprToColumn when))
           cases)
        (exprToColumn defaultCase))
+
+--------------------------------------------------------------------------------
+-- | Types which can decide if one value contains another
+class DBInclusion x xs | xs -> x where
+  -- | Is the left operand contained within the right?
+  (<@.) :: Expr x -> Expr xs -> Expr Bool
+  Expr x <@. Expr xs = Expr (O.BinExpr (O.:<@) x xs)
+
+  -- | Is the right operand contained within the left?
+  (@>.) :: Expr xs -> Expr x -> Expr Bool
+  Expr xs @>. Expr x = Expr (O.BinExpr (O.:@>) xs x)
+
+instance DBInclusion UTCTime   (PGSR.PGRange UTCTime)
+instance DBInclusion LocalTime (PGSR.PGRange LocalTime)
+instance DBInclusion Day       (PGSR.PGRange Day)
+instance DBInclusion Int       (PGSR.PGRange Int)
+instance DBInclusion Int64     (PGSR.PGRange Int64)
+
+instance DBInclusion a [a]
+
+-- instance JSONB JSONB...
