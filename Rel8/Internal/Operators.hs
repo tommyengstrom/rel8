@@ -10,6 +10,7 @@ module Rel8.Internal.Operators where
 import Data.Int (Int16, Int32, Int64)
 import Data.Text (Text)
 import Data.Time (UTCTime, LocalTime, Day)
+import Data.Vector (Vector)
 import qualified Database.PostgreSQL.Simple.Range as PGSR
 import qualified Opaleye.Internal.HaskellDB.PrimQuery as O
 import qualified Opaleye.Operators as O
@@ -135,6 +136,6 @@ instance DBInclusion Day       (PGSR.PGRange Day)
 instance DBInclusion Int       (PGSR.PGRange Int)
 instance DBInclusion Int64     (PGSR.PGRange Int64)
 
-instance DBInclusion a [a]
+instance DBInclusion (Vector a) (Vector a)
 
 -- instance JSONB JSONB...
