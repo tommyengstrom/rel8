@@ -5,6 +5,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DeriveFunctor #-}
 
 module Rel8.Internal.Types where
 
@@ -46,7 +47,7 @@ data SchemaInfo a =
 data Default a
   = OverrideDefault a
   | InsertDefault
-  deriving Show
+  deriving (Show, Functor)
 
 --------------------------------------------------------------------------------
 {-| All metadata about a column in a table.
