@@ -471,6 +471,10 @@ instance (Table a a', Table b b', Table c c', Table d d') =>
          Table (a, b, c, d) (a', b', c', d')
 instance (Table a a', Table b b', Table c c', Table d d', Table e e') =>
          Table (a, b, c, d, e) (a', b', c', d', e')
+instance (Table a a', Table b b', Table c c', Table d d', Table e e', Table f f') =>
+         Table (a, b, c, d, e, f) (a', b', c', d', e', f')
+instance (Table a a', Table b b', Table c c', Table d d', Table e e', Table f f', Table g g') =>
+         Table (a, b, c, d, e, f, g) (a', b', c', d', e', f', g')
 
 instance (AggregateTable a a', AggregateTable b b') =>
          AggregateTable (a, b) (a', b')
