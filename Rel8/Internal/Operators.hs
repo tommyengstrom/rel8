@@ -77,7 +77,7 @@ instance DBEq (PGSR.PGRange LocalTime) where
 instance DBEq (PGSR.PGRange Day) where
 instance DBEq (PGSR.PGRange Int) where
 instance DBEq (PGSR.PGRange Int64) where
-
+instance DBEq a => DBEq (Maybe a) where
 
 --------------------------------------------------------------------------------
 class DBEq a => DBOrd a where
@@ -106,6 +106,7 @@ instance DBOrd Int32 where
 instance DBOrd Int64 where
 instance DBOrd Text where
 instance DBOrd UTCTime where
+instance DBOrd a => DBOrd (Maybe a) where
 
 -- | Case statement. @case_ [(x,a), (y, b)] c@ corresponds to
 -- @CASE WHEN x THEN a WHEN y THEN b ELSE c END@.
