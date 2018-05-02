@@ -69,7 +69,7 @@ instance DBEq Int32 where
 instance DBEq Int64 where
 instance DBEq Text where
 instance DBEq UTCTime where
-
+instance DBEq a => DBEq (Maybe a) where
 
 --------------------------------------------------------------------------------
 class DBEq a => DBOrd a where
@@ -98,6 +98,7 @@ instance DBOrd Int32 where
 instance DBOrd Int64 where
 instance DBOrd Text where
 instance DBOrd UTCTime where
+instance DBOrd a => DBOrd (Maybe a) where
 
 -- | Case statement. @case_ [(x,a), (y, b)] c@ corresponds to
 -- @CASE WHEN x THEN a WHEN y THEN b ELSE c END@.
