@@ -1,8 +1,9 @@
-resolver: lts-10.8
+resolver: lts-11.7
 
 packages:
   - .
 
 extra-deps:
-  - opaleye-0.6.1.0
-  - streaming-postgresql-simple-0.2.0.3
+
+    - git: git://github.com/BlackBrane/streaming-postgresql-simple
+      commit: 0362852c1c503d625692797b8f738ff86fa20e0b
